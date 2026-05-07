@@ -38,4 +38,14 @@ public class WorkspaceController {
     public void delete(@PathVariable Long id) {
         workspaceService.delete(id, currentUserService.get().getId());
     }
+
+    @PostMapping("/{id}/invite")
+    public void invite(@PathVariable Long id, @RequestBody InviteRequest request) {
+        workspaceService.inviteUser(id, request, currentUserService.get().getId());
+    }
+
+    @GetMapping("/{id}/members")
+    public List<WorkspaceMemberResponse> getMembers(@PathVariable Long id) {
+        return workspaceService.getMembers(id, currentUserService.get().getId());
+    }
 }

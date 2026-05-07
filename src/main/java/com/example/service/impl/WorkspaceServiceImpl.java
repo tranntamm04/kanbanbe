@@ -2,13 +2,14 @@ package com.example.service.impl;
 
 import com.example.dto.workspace.WorkspaceRequest;
 import com.example.dto.workspace.WorkspaceResponse;
+import com.example.dto.workspace.InviteRequest;
+import com.example.dto.workspace.WorkspaceMemberResponse;
 import com.example.entity.*;
-import com.example.entity.Workspace;
-import com.example.entity.WorkspaceMember;
-import com.example.entity.WorkspaceRole;
 import com.example.exception.AppException;
 import com.example.repository.*;
 import com.example.service.WorkspaceService;
+import com.example.service.EmailService;
+import com.example.service.NotificationService;
 
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
@@ -17,6 +18,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
@@ -32,6 +34,8 @@ public class WorkspaceServiceImpl implements WorkspaceService {
     private final CommentRepository commentRepository;
     private final ActivityRepository activityRepository;
     private final NotificationRepository notificationRepository;
+    private final EmailService emailService;
+    private final NotificationService notificationService;
 
     @Override
     public WorkspaceResponse create(WorkspaceRequest request, Long userId) {
@@ -47,7 +51,6 @@ public class WorkspaceServiceImpl implements WorkspaceService {
 
         workspaceRepository.save(workspace);
 
-        // Add OWNER
         WorkspaceMember member = WorkspaceMember.builder()
                 .user(user)
                 .workspace(workspace)
@@ -113,6 +116,147 @@ public class WorkspaceServiceImpl implements WorkspaceService {
         workspaceRepository.deleteById(id);
     }
 
+    @Override
+    public void inviteUser(Long workspaceId, InviteRequest request, Long userId) {
+
+        Workspace workspace = workspaceRepository.findById(workspaceId)
+                .orElseThrow(() -> new AppException("Workspace not found"));
+
+        WorkspaceMember inviter = memberRepository
+                .findByUserIdAndWorkspaceId(userId, workspaceId)
+                .orElseThrow(() -> new AppException("Not a member of this workspace"));
+
+        if (inviter.getRole() != WorkspaceRole.OWNER
+                && inviter.getRole() != WorkspaceRole.ADMIN) {
+            throw new AppException("Only owner or admin can invite users");
+        }
+
+        String email = request.getEmail().trim().toLowerCase();
+
+        // Check user already member
+        User existingUser = userRepository.findByEmail(email).orElse(null);
+
+        if (existingUser != null
+                && memberRepository.existsByUserIdAndWorkspaceId(
+                        existingUser.getId(),
+                        workspaceId)) {
+
+            throw new AppException("User is already a member");
+        }
+
+        // Find old invite
+        WorkspaceInvite oldInvite = inviteRepository
+                .findByEmailAndWorkspaceId(email, workspaceId)
+                .orElse(null);
+
+        // Nếu invite cũ chưa accept -> xoá để gửi lại
+        if (oldInvite != null && !oldInvite.isAccepted()) {
+            inviteRepository.delete(oldInvite);
+        }
+
+        WorkspaceRole role =
+                WorkspaceRole.valueOf(request.getRole().toUpperCase());
+
+        String token = UUID.randomUUID().toString();
+
+        WorkspaceInvite invite = WorkspaceInvite.builder()
+                .email(email)
+                .workspace(workspace)
+                .invitedBy(inviter.getUser())
+                .role(role)
+                .token(token)
+                .expiredAt(LocalDateTime.now().plusDays(7))
+                .createdAt(LocalDateTime.now())
+                .accepted(false)
+                .build();
+
+        inviteRepository.save(invite);
+
+        emailService.sendInviteEmail(
+                email,
+                workspace.getName(),
+                inviter.getUser().getUsername(),
+                token
+        );
+
+        // Tạo notification nếu user đã tồn tại trong hệ thống
+        if (existingUser != null) {
+            notificationService.notify(
+                    existingUser,
+                    "Bạn được mời tham gia workspace \"" + workspace.getName() + "\" với vai trò " + role.name().toLowerCase(),
+                    null,
+                    workspace
+            );
+        }
+    }
+
+    @Override
+    @Transactional
+    public void acceptInvite(String token, Long userId) {
+        WorkspaceInvite invite = inviteRepository.findByToken(token)
+                .orElseThrow(() -> new AppException("Invalid invite token"));
+
+        if (invite.isAccepted()) {
+            throw new AppException("Invite already accepted");
+        }
+
+        if (invite.getExpiredAt().isBefore(LocalDateTime.now())) {
+            throw new AppException("Invite expired");
+        }
+
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new AppException("User not found"));
+
+        if (!user.getEmail().equals(invite.getEmail())) {
+            throw new AppException("Email mismatch");
+        }
+
+        // Check if already a member
+        if (memberRepository.existsByUserIdAndWorkspaceId(userId, invite.getWorkspace().getId())) {
+            throw new AppException("Already a member");
+        }
+
+        WorkspaceMember member = WorkspaceMember.builder()
+                .user(user)
+                .workspace(invite.getWorkspace())
+                .role(invite.getRole())
+                .build();
+
+        memberRepository.save(member);
+
+        invite.setAccepted(true);
+        inviteRepository.save(invite);
+
+        // Thông báo cho người mời
+        notificationService.notify(
+                invite.getInvitedBy(),
+                user.getUsername() + " đã chấp nhận lời mời tham gia workspace \"" + invite.getWorkspace().getName() + "\"",
+                null,
+                invite.getWorkspace()
+        );
+    }
+
+    @Override
+    public List<WorkspaceMemberResponse> getMembers(Long workspaceId, Long userId) {
+        Workspace workspace = workspaceRepository.findById(workspaceId)
+                .orElseThrow(() -> new AppException("Workspace not found"));
+
+        boolean isMember = memberRepository.existsByUserIdAndWorkspaceId(userId, workspaceId);
+
+        if (!isMember) {
+            throw new AppException("Access denied");
+        }
+
+        return memberRepository.findByWorkspaceId(workspaceId)
+                .stream()
+                .map(member -> WorkspaceMemberResponse.builder()
+                        .id(member.getUser().getId())
+                        .username(member.getUser().getUsername())
+                        .email(member.getUser().getEmail())
+                        .role(member.getRole().name())
+                        .build())
+                .toList();
+    }
     private WorkspaceResponse map(Workspace w) {
         return WorkspaceResponse.builder()
                 .id(w.getId())

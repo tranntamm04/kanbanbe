@@ -39,4 +39,34 @@ public class EmailServiceImpl implements EmailService {
             throw new RuntimeException("Send mail failed: " + e.getMessage());
         }
     }
+
+    @Override
+    public void sendInviteEmail(String toEmail, String workspaceName, String inviterName, String token) {
+        try {
+            MimeMessage message = mailSender.createMimeMessage();
+
+            MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
+            helper.setFrom("tranductam274@gmail.com");
+
+            helper.setTo(toEmail);
+
+            helper.setSubject("Lời mời tham gia Workspace: " + workspaceName);
+
+            String inviteUrl = "http://localhost:5173/accept-invite?token=" + token;
+
+            helper.setText(
+                "<h3>Bạn được mời tham gia Workspace: " + workspaceName + "</h3>" +
+                "<p>Người mời: " + inviterName + "</p>" +
+                "<p>Nhấp vào liên kết dưới đây để chấp nhận lời mời:</p>" +
+                "<a href='" + inviteUrl + "'>Chấp nhận lời mời</a>" +
+                "<p>Liên kết có hiệu lực trong 7 ngày.</p>",
+                true
+            );
+
+            mailSender.send(message);
+
+        } catch (Exception e) {
+            throw new RuntimeException("Send mail failed: " + e.getMessage());
+        }
+    }
 }
