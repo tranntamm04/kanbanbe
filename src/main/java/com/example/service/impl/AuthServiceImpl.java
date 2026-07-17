@@ -15,8 +15,9 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
+import java.security.SecureRandom;
+import java.time.LocalDateTime;
 import java.util.Set;
-import java.util.Random;
 import java.util.concurrent.ConcurrentHashMap;
 
 @Service
@@ -28,16 +29,20 @@ public class AuthServiceImpl implements AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenUtil jwtTokenUtil;
     private final EmailService emailService;
-    private final ConcurrentHashMap<String, String> otpStorage = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, OtpChallenge> otpStorage = new ConcurrentHashMap<>();
+    private final SecureRandom secureRandom = new SecureRandom();
 
     @Override
     public void register(RegisterRequest request) {
 
-        if (userRepository.existsByUsername(request.getUsername())) {
+        String username = request.getUsername().trim();
+        String email = request.getEmail().trim().toLowerCase();
+
+        if (userRepository.existsByUsername(username)) {
             throw new AppException("USERNAME_EXISTS");
         }
 
-        if (userRepository.existsByEmail(request.getEmail())) {
+        if (userRepository.existsByEmail(email)) {
             throw new AppException("EMAIL_EXISTS");
         }
 
@@ -47,9 +52,9 @@ public class AuthServiceImpl implements AuthService {
                 ));
 
         User user = new User();
-        user.setUsername(request.getUsername());
+        user.setUsername(username);
         user.setPassword(passwordEncoder.encode(request.getPassword()));
-        user.setEmail(request.getEmail());
+        user.setEmail(email);
         user.setEnabled(true);
         user.setRoles(Set.of(role));
 
@@ -59,7 +64,7 @@ public class AuthServiceImpl implements AuthService {
     @Override
     public JwtResponse login(LoginRequest request) {
 
-        User user = userRepository.findByUsername(request.getUsername())
+        User user = userRepository.findByUsername(request.getUsername().trim())
                 .orElseThrow(() -> new AppException("USER_NOT_FOUND"));
 
         if (!passwordEncoder.matches(request.getPassword(), user.getPassword())) {
@@ -72,38 +77,45 @@ public class AuthServiceImpl implements AuthService {
     }
 
     private String generateOtp() {
-        Random random = new Random();
-        int otp = 100000 + random.nextInt(900000);
+        int otp = 100000 + secureRandom.nextInt(900000);
         return String.valueOf(otp);
     }
 
     @Override
     public void forgotPassword(String email) {
 
-        User user = userRepository.findByEmail(email)
+        String normalizedEmail = email.trim().toLowerCase();
+
+        userRepository.findByEmail(normalizedEmail)
                 .orElseThrow(() -> new AppException("EMAIL_NOT_FOUND"));
 
         String otp = generateOtp();
-        otpStorage.put(email, otp);
+        otpStorage.put(normalizedEmail, new OtpChallenge(otp, LocalDateTime.now().plusMinutes(15)));
 
-        emailService.sendOtpEmail(email, otp);
+        emailService.sendOtpEmail(normalizedEmail, otp);
     }
 
     @Override
     public void resetPassword(String email, String otp, String newPassword) {
 
-        String storedOtp = otpStorage.get(email);
+        String normalizedEmail = email.trim().toLowerCase();
+        OtpChallenge storedOtp = otpStorage.get(normalizedEmail);
 
-        if (storedOtp == null || !storedOtp.equals(otp)) {
+        if (storedOtp == null
+                || storedOtp.expiresAt().isBefore(LocalDateTime.now())
+                || !storedOtp.code().equals(otp)) {
             throw new AppException("INVALID_OTP");
         }
 
-        User user = userRepository.findByEmail(email)
+        User user = userRepository.findByEmail(normalizedEmail)
                 .orElseThrow(() -> new AppException("USER_NOT_FOUND"));
 
         user.setPassword(passwordEncoder.encode(newPassword));
         userRepository.save(user);
 
-        otpStorage.remove(email);
+        otpStorage.remove(normalizedEmail);
+    }
+
+    private record OtpChallenge(String code, LocalDateTime expiresAt) {
     }
 }

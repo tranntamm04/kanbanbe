@@ -4,13 +4,13 @@ import com.example.dto.column.*;
 import com.example.service.ColumnService;
 
 import com.example.service.CurrentUserService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
-@CrossOrigin("*")
 @RestController
 @RequestMapping("/api/columns")
 @RequiredArgsConstructor
@@ -22,7 +22,7 @@ public class ColumnController {
     @PostMapping
     public ColumnResponse create(
             @RequestParam Long projectId,
-            @RequestBody ColumnRequest request
+            @Valid @RequestBody ColumnRequest request
     ) {
         return columnService.create(projectId, request, currentUserService.get().getId());
     }
@@ -35,7 +35,7 @@ public class ColumnController {
     @PutMapping("/{id}")
     public ColumnResponse update(
             @PathVariable Long id,
-            @RequestBody ColumnRequest request
+            @Valid @RequestBody ColumnRequest request
     ) {
         return columnService.update(id, request, currentUserService.get().getId());
     }

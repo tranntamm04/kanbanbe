@@ -25,7 +25,8 @@ import java.util.List;
 public class SecurityConfig {
 
     private final JwtAuthenticationEntryPoint entryPoint;
-    private final JwtRequestFilter JwtRequestFilter;
+    private final JwtRequestFilter jwtRequestFilter;
+    private final AppProperties appProperties;
 
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
@@ -36,15 +37,21 @@ public class SecurityConfig {
                 .exceptionHandling(ex -> ex.authenticationEntryPoint(entryPoint))
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/api/auth/**").permitAll()
+                        .requestMatchers(
+                                "/api/auth/login",
+                                "/api/auth/register",
+                                "/api/auth/forgot-password",
+                                "/api/auth/reset-password"
+                        ).permitAll()
                         .requestMatchers("/api/workspaces/**", "/api/tasks/**",
                                 "/api/projects/**", "/api/columns/**",
-                        "/api/notifications/**", "/api/comments/**", "/api/activities/**").authenticated()
+                                "/api/notifications/**", "/api/comments/**", "/api/activities/**",
+                                "/api/auth/accept-invite").authenticated()
                         .anyRequest().authenticated()
                 );
 
         http.addFilterBefore(
-                JwtRequestFilter,
+                jwtRequestFilter,
                 UsernamePasswordAuthenticationFilter.class
         );
 
@@ -56,8 +63,8 @@ public class SecurityConfig {
 
         CorsConfiguration config = new CorsConfiguration();
 
-        config.setAllowedOrigins(List.of("http://localhost:5173"));
-        config.setAllowedMethods(List.of("GET","POST","PUT","DELETE","OPTIONS"));
+        config.setAllowedOrigins(appProperties.cors().allowedOrigins());
+        config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
         config.setAllowCredentials(true);
 
@@ -74,3 +81,4 @@ public class SecurityConfig {
         return new BCryptPasswordEncoder();
     }
 }
+

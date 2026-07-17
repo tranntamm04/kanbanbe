@@ -4,13 +4,13 @@ import com.example.dto.comment.*;
 import com.example.service.CommentService;
 
 import com.example.service.CurrentUserService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
-@CrossOrigin("*")
 @RestController
 @RequestMapping("/api/comments")
 @RequiredArgsConstructor
@@ -20,7 +20,7 @@ public class CommentController {
     private final CurrentUserService currentUserService;
     
     @PostMapping
-    public CommentResponse create(@RequestParam Long taskId, @RequestBody CommentRequest request) {
+    public CommentResponse create(@RequestParam Long taskId, @Valid @RequestBody CommentRequest request) {
         return commentService.create(taskId, request, currentUserService.get().getId());
     }
 

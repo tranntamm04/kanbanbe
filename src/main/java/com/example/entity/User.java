@@ -26,6 +26,7 @@ public class User {
     @Column(unique = true)
     private String email;
 
+    @Builder.Default
     private Boolean enabled = true;
 
     @ManyToMany(fetch = FetchType.EAGER)

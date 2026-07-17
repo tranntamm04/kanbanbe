@@ -20,5 +20,8 @@ WHERE t.project.workspace.id = :workspaceId
 
     List<Task> findByProjectWorkspaceId(Long workspaceId);
 
+    long countByColumnId(Long columnId);
+
+    @EntityGraph(attributePaths = {"column", "assignee"})
     List<Task> findByColumnIdOrderByPositionAsc(Long columnId);
 }

@@ -17,5 +17,6 @@ public class TaskResponse {
     private Integer position;
     private Long columnId;
     private Long assigneeId;
+    private Long createdById;
     private LocalDateTime dueDate;
 }

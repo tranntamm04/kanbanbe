@@ -1,19 +1,37 @@
 package com.example.service.impl;
 
+import com.example.dto.workspace.InviteRequest;
+import com.example.dto.workspace.InviteResponse;
+import com.example.dto.workspace.WorkspaceMemberResponse;
 import com.example.dto.workspace.WorkspaceRequest;
 import com.example.dto.workspace.WorkspaceResponse;
-import com.example.dto.workspace.InviteRequest;
-import com.example.dto.workspace.WorkspaceMemberResponse;
-import com.example.entity.*;
+import com.example.entity.Activity;
+import com.example.entity.BoardColumn;
+import com.example.entity.Task;
+import com.example.entity.User;
+import com.example.entity.Workspace;
+import com.example.entity.WorkspaceInvite;
+import com.example.entity.WorkspaceMember;
+import com.example.entity.WorkspaceRole;
 import com.example.exception.AppException;
-import com.example.repository.*;
-import com.example.service.WorkspaceService;
+import com.example.repository.ActivityRepository;
+import com.example.repository.BoardColumnRepository;
+import com.example.repository.CommentRepository;
+import com.example.repository.NotificationRepository;
+import com.example.repository.ProjectRepository;
+import com.example.repository.TaskRepository;
+import com.example.repository.UserRepository;
+import com.example.repository.WorkspaceInviteRepository;
+import com.example.repository.WorkspaceMemberRepository;
+import com.example.repository.WorkspaceRepository;
 import com.example.service.EmailService;
 import com.example.service.NotificationService;
-
+import com.example.service.WorkspaceService;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
-
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -23,6 +41,8 @@ import java.util.UUID;
 @Service
 @RequiredArgsConstructor
 public class WorkspaceServiceImpl implements WorkspaceService {
+
+    private static final Logger log = LoggerFactory.getLogger(WorkspaceServiceImpl.class);
 
     private final WorkspaceRepository workspaceRepository;
     private final WorkspaceMemberRepository memberRepository;
@@ -37,14 +57,16 @@ public class WorkspaceServiceImpl implements WorkspaceService {
     private final EmailService emailService;
     private final NotificationService notificationService;
 
+    @Value("${app.frontend-url}")
+    private String frontendUrl;
+
     @Override
     public WorkspaceResponse create(WorkspaceRequest request, Long userId) {
-
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new AppException("User not found"));
 
         Workspace workspace = Workspace.builder()
-                .name(request.getName())
+                .name(request.getName().trim())
                 .createdBy(user)
                 .createdAt(LocalDateTime.now())
                 .build();
@@ -72,12 +94,10 @@ public class WorkspaceServiceImpl implements WorkspaceService {
 
     @Override
     public WorkspaceResponse getById(Long id, Long userId) {
-
         Workspace workspace = workspaceRepository.findById(id)
                 .orElseThrow(() -> new AppException("Workspace not found"));
 
         boolean isMember = memberRepository.existsByUserIdAndWorkspaceId(userId, id);
-
         if (!isMember) {
             throw new AppException("Access denied");
         }
@@ -88,7 +108,6 @@ public class WorkspaceServiceImpl implements WorkspaceService {
     @Override
     @Transactional
     public void delete(Long id, Long userId) {
-
         WorkspaceMember member = memberRepository
                 .findByUserIdAndWorkspaceId(userId, id)
                 .orElseThrow(() -> new AppException("Not member"));
@@ -117,8 +136,8 @@ public class WorkspaceServiceImpl implements WorkspaceService {
     }
 
     @Override
-    public void inviteUser(Long workspaceId, InviteRequest request, Long userId) {
-
+    @Transactional
+    public InviteResponse inviteUser(Long workspaceId, InviteRequest request, Long userId) {
         Workspace workspace = workspaceRepository.findById(workspaceId)
                 .orElseThrow(() -> new AppException("Workspace not found"));
 
@@ -126,37 +145,23 @@ public class WorkspaceServiceImpl implements WorkspaceService {
                 .findByUserIdAndWorkspaceId(userId, workspaceId)
                 .orElseThrow(() -> new AppException("Not a member of this workspace"));
 
-        if (inviter.getRole() != WorkspaceRole.OWNER
-                && inviter.getRole() != WorkspaceRole.ADMIN) {
+        if (inviter.getRole() != WorkspaceRole.OWNER && inviter.getRole() != WorkspaceRole.ADMIN) {
             throw new AppException("Only owner or admin can invite users");
         }
 
         String email = request.getEmail().trim().toLowerCase();
-
-        // Check user already member
         User existingUser = userRepository.findByEmail(email).orElse(null);
 
-        if (existingUser != null
-                && memberRepository.existsByUserIdAndWorkspaceId(
-                        existingUser.getId(),
-                        workspaceId)) {
-
+        if (existingUser != null && memberRepository.existsByUserIdAndWorkspaceId(existingUser.getId(), workspaceId)) {
             throw new AppException("User is already a member");
         }
 
-        // Find old invite
-        WorkspaceInvite oldInvite = inviteRepository
-                .findByEmailAndWorkspaceId(email, workspaceId)
-                .orElse(null);
-
-        // Nếu invite cũ chưa accept -> xoá để gửi lại
+        WorkspaceInvite oldInvite = inviteRepository.findByEmailAndWorkspaceId(email, workspaceId).orElse(null);
         if (oldInvite != null && !oldInvite.isAccepted()) {
             inviteRepository.delete(oldInvite);
         }
 
-        WorkspaceRole role =
-                WorkspaceRole.valueOf(request.getRole().toUpperCase());
-
+        WorkspaceRole role = WorkspaceRole.valueOf(request.getRole().trim().toUpperCase());
         String token = UUID.randomUUID().toString();
 
         WorkspaceInvite invite = WorkspaceInvite.builder()
@@ -172,14 +177,9 @@ public class WorkspaceServiceImpl implements WorkspaceService {
 
         inviteRepository.save(invite);
 
-        emailService.sendInviteEmail(
-                email,
-                workspace.getName(),
-                inviter.getUser().getUsername(),
-                token
-        );
+        String inviteUrl = buildInviteUrl(token);
+        boolean emailSent = sendInviteEmail(email, workspace, inviter.getUser(), token);
 
-        // Tạo notification nếu user đã tồn tại trong hệ thống
         if (existingUser != null) {
             notificationService.notify(
                     existingUser,
@@ -188,6 +188,13 @@ public class WorkspaceServiceImpl implements WorkspaceService {
                     workspace
             );
         }
+
+        return InviteResponse.builder()
+                .email(email)
+                .role(role.name())
+                .inviteUrl(inviteUrl)
+                .emailSent(emailSent)
+                .build();
     }
 
     @Override
@@ -207,11 +214,10 @@ public class WorkspaceServiceImpl implements WorkspaceService {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new AppException("User not found"));
 
-        if (!user.getEmail().equals(invite.getEmail())) {
+        if (!user.getEmail().equalsIgnoreCase(invite.getEmail())) {
             throw new AppException("Email mismatch");
         }
 
-        // Check if already a member
         if (memberRepository.existsByUserIdAndWorkspaceId(userId, invite.getWorkspace().getId())) {
             throw new AppException("Already a member");
         }
@@ -227,7 +233,6 @@ public class WorkspaceServiceImpl implements WorkspaceService {
         invite.setAccepted(true);
         inviteRepository.save(invite);
 
-        // Thông báo cho người mời
         notificationService.notify(
                 invite.getInvitedBy(),
                 user.getUsername() + " đã chấp nhận lời mời tham gia workspace \"" + invite.getWorkspace().getName() + "\"",
@@ -238,11 +243,10 @@ public class WorkspaceServiceImpl implements WorkspaceService {
 
     @Override
     public List<WorkspaceMemberResponse> getMembers(Long workspaceId, Long userId) {
-        Workspace workspace = workspaceRepository.findById(workspaceId)
+        workspaceRepository.findById(workspaceId)
                 .orElseThrow(() -> new AppException("Workspace not found"));
 
         boolean isMember = memberRepository.existsByUserIdAndWorkspaceId(userId, workspaceId);
-
         if (!isMember) {
             throw new AppException("Access denied");
         }
@@ -257,12 +261,31 @@ public class WorkspaceServiceImpl implements WorkspaceService {
                         .build())
                 .toList();
     }
-    private WorkspaceResponse map(Workspace w) {
+
+    private boolean sendInviteEmail(String email, Workspace workspace, User inviter, String token) {
+        try {
+            emailService.sendInviteEmail(email, workspace.getName(), inviter.getUsername(), token);
+            return true;
+        } catch (RuntimeException ex) {
+            log.warn("Invite was created but email could not be sent to {}: {}", email, ex.getMessage());
+            return false;
+        }
+    }
+
+    private String buildInviteUrl(String token) {
+        String normalizedFrontendUrl = frontendUrl.endsWith("/")
+                ? frontendUrl.substring(0, frontendUrl.length() - 1)
+                : frontendUrl;
+
+        return normalizedFrontendUrl + "/accept-invite?token=" + token;
+    }
+
+    private WorkspaceResponse map(Workspace workspace) {
         return WorkspaceResponse.builder()
-                .id(w.getId())
-                .name(w.getName())
-                .createdBy(w.getCreatedBy().getUsername())
-                .createdAt(w.getCreatedAt())
+                .id(workspace.getId())
+                .name(workspace.getName())
+                .createdBy(workspace.getCreatedBy().getUsername())
+                .createdAt(workspace.getCreatedAt())
                 .build();
     }
 }

@@ -1,9 +1,10 @@
 package com.example.service;
 
+import com.example.dto.workspace.InviteRequest;
+import com.example.dto.workspace.InviteResponse;
+import com.example.dto.workspace.WorkspaceMemberResponse;
 import com.example.dto.workspace.WorkspaceRequest;
 import com.example.dto.workspace.WorkspaceResponse;
-import com.example.dto.workspace.InviteRequest;
-import com.example.dto.workspace.WorkspaceMemberResponse;
 
 import java.util.List;
 
@@ -17,7 +18,7 @@ public interface WorkspaceService {
 
     void delete(Long id, Long userId);
 
-    void inviteUser(Long workspaceId, InviteRequest request, Long userId);
+    InviteResponse inviteUser(Long workspaceId, InviteRequest request, Long userId);
 
     void acceptInvite(String token, Long userId);
 

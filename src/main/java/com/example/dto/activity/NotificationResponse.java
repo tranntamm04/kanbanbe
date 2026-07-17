@@ -13,4 +13,6 @@ public class NotificationResponse {
     private String message;
     private boolean isRead;
     private LocalDateTime createdAt;
+    private Long taskId;
+    private Long workspaceId;
 }

@@ -18,6 +18,8 @@ import java.util.List;
 @RequiredArgsConstructor
 public class ProjectServiceImpl implements ProjectService {
 
+    private static final List<String> DEFAULT_COLUMN_NAMES = List.of("Cần làm", "Đang làm", "Hoàn thành");
+
     private final ProjectRepository projectRepository;
     private final WorkspaceRepository workspaceRepository;
     private final WorkspaceMemberRepository memberRepository;
@@ -28,8 +30,8 @@ public class ProjectServiceImpl implements ProjectService {
     private final NotificationRepository notificationRepository;
 
     @Override
+    @Transactional
     public ProjectResponse create(Long workspaceId, ProjectRequest request, Long userId) {
-
         Workspace workspace = workspaceRepository.findById(workspaceId)
                 .orElseThrow(() -> new AppException("Workspace not found"));
 
@@ -42,19 +44,19 @@ public class ProjectServiceImpl implements ProjectService {
         }
 
         Project project = Project.builder()
-                .name(request.getName())
+                .name(request.getName().trim())
                 .workspace(workspace)
                 .status(ProjectStatus.ACTIVE)
                 .build();
 
         projectRepository.save(project);
+        createDefaultColumns(project);
 
         return map(project);
     }
 
     @Override
     public List<ProjectResponse> getByWorkspace(Long workspaceId, Long userId) {
-
         boolean isMember = memberRepository.existsByUserIdAndWorkspaceId(userId, workspaceId);
 
         if (!isMember) {
@@ -69,7 +71,6 @@ public class ProjectServiceImpl implements ProjectService {
 
     @Override
     public ProjectResponse getById(Long projectId, Long userId) {
-
         Project project = projectRepository.findById(projectId)
                 .orElseThrow(() -> new AppException("Project not found"));
 
@@ -80,7 +81,6 @@ public class ProjectServiceImpl implements ProjectService {
 
     @Override
     public ProjectResponse update(Long projectId, ProjectRequest request, Long userId) {
-
         Project project = projectRepository.findById(projectId)
                 .orElseThrow(() -> new AppException("Project not found"));
 
@@ -90,7 +90,7 @@ public class ProjectServiceImpl implements ProjectService {
             throw new AppException("Permission denied");
         }
 
-        project.setName(request.getName());
+        project.setName(request.getName().trim());
 
         return map(projectRepository.save(project));
     }
@@ -98,7 +98,6 @@ public class ProjectServiceImpl implements ProjectService {
     @Override
     @Transactional
     public void delete(Long projectId, Long userId) {
-
         Project project = projectRepository.findById(projectId)
                 .orElseThrow(() -> new AppException("Project not found"));
 
@@ -125,7 +124,6 @@ public class ProjectServiceImpl implements ProjectService {
 
     @Override
     public void archive(Long projectId, Long userId) {
-
         Project project = projectRepository.findById(projectId)
                 .orElseThrow(() -> new AppException("Project not found"));
 
@@ -140,9 +138,20 @@ public class ProjectServiceImpl implements ProjectService {
     }
 
     private WorkspaceMember checkMember(Long workspaceId, Long userId) {
-
         return memberRepository.findByUserIdAndWorkspaceId(userId, workspaceId)
                 .orElseThrow(() -> new AppException("Access denied"));
+    }
+
+    private void createDefaultColumns(Project project) {
+        List<BoardColumn> columns = DEFAULT_COLUMN_NAMES.stream()
+                .map(name -> BoardColumn.builder()
+                        .name(name)
+                        .project(project)
+                        .position(DEFAULT_COLUMN_NAMES.indexOf(name))
+                        .build())
+                .toList();
+
+        columnRepository.saveAll(columns);
     }
 
     private ProjectResponse map(Project p) {

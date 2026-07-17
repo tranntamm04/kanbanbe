@@ -30,13 +30,10 @@ public class TaskServiceImpl implements TaskService {
     public TaskResponse create(Long columnId, TaskRequest request, Long userId) {
 
         BoardColumn column = getColumn(columnId);
-        checkMember(column, userId);
+        requireWorkspaceMember(column, userId);
+        ensureProjectIsEditable(column.getProject(), "Cannot add task to archived project");
 
-        if (column.getProject().getStatus() == ProjectStatus.ARCHIVED) {
-            throw new AppException("Cannot add task to archived project");
-        }
-
-        int position = taskRepository.findByColumnIdOrderByPositionAsc(columnId).size();
+        int position = Math.toIntExact(taskRepository.countByColumnId(columnId));
 
         Task task = Task.builder()
                 .title(request.getTitle())
@@ -60,7 +57,7 @@ public class TaskServiceImpl implements TaskService {
     public List<TaskResponse> getByColumn(Long columnId, Long userId) {
 
         BoardColumn column = getColumn(columnId);
-        checkMember(column, userId);
+        requireWorkspaceMember(column, userId);
 
         return taskRepository.findByColumnIdOrderByPositionAsc(columnId)
                 .stream().map(this::map).toList();
@@ -70,11 +67,8 @@ public class TaskServiceImpl implements TaskService {
     public TaskResponse update(Long taskId, TaskRequest request, Long userId) {
 
         Task task = getTask(taskId);
-        checkMember(task.getColumn(), userId);
-
-        if (task.getProject().getStatus() == ProjectStatus.ARCHIVED) {
-            throw new AppException("Cannot edit tasks in archived project");
-        }
+        requireCanEditTask(task, userId);
+        ensureProjectIsEditable(task.getProject(), "Cannot edit tasks in archived project");
 
         task.setTitle(request.getTitle());
         task.setDescription(request.getDescription());
@@ -89,7 +83,8 @@ public class TaskServiceImpl implements TaskService {
     public void delete(Long taskId, Long userId) {
 
         Task task = getTask(taskId);
-        checkMember(task.getColumn(), userId);
+        requireBoardManager(task.getColumn(), userId);
+        ensureProjectIsEditable(task.getProject(), "Cannot delete tasks in archived project");
 
         commentRepository.deleteByTaskIdIn(List.of(taskId));
         activityRepository.deleteByTaskIdIn(List.of(taskId));
@@ -106,12 +101,9 @@ public class TaskServiceImpl implements TaskService {
         BoardColumn sourceColumn = task.getColumn();
         BoardColumn targetColumn = getColumn(request.getTargetColumnId());
 
-        checkMember(sourceColumn, userId);
-        checkMember(targetColumn, userId);
-
-        if (task.getProject().getStatus() == ProjectStatus.ARCHIVED) {
-            throw new AppException("Cannot move tasks inside archived project");
-        }
+        requireCanEditTask(task, userId);
+        requireSameProject(sourceColumn, targetColumn);
+        ensureProjectIsEditable(task.getProject(), "Cannot move tasks inside archived project");
 
         List<Task> sourceTasks = taskRepository.findByColumnIdOrderByPositionAsc(sourceColumn.getId());
         List<Task> targetTasks = taskRepository.findByColumnIdOrderByPositionAsc(targetColumn.getId());
@@ -154,8 +146,6 @@ public class TaskServiceImpl implements TaskService {
         return map(task);
     }
 
-    // ===== HELPER =====
-
     private Task getTask(Long id) {
         return taskRepository.findById(id)
                 .orElseThrow(() -> new AppException("Task not found"));
@@ -176,14 +166,49 @@ public class TaskServiceImpl implements TaskService {
         return getUser(id);
     }
 
-    private void checkMember(BoardColumn column, Long userId) {
-        boolean isMember = memberRepository.existsByUserIdAndWorkspaceId(
-                userId,
-                column.getProject().getWorkspace().getId()
-        );
+    private WorkspaceMember requireWorkspaceMember(BoardColumn column, Long userId) {
+        Long workspaceId = column.getProject().getWorkspace().getId();
+        return memberRepository.findByUserIdAndWorkspaceId(userId, workspaceId)
+                .orElseThrow(() -> new AppException("Access denied"));
+    }
 
-        if (!isMember) {
-            throw new AppException("Access denied");
+    private void requireBoardManager(BoardColumn column, Long userId) {
+        WorkspaceMember member = requireWorkspaceMember(column, userId);
+        if (!isBoardManager(member)) {
+            throw new AppException("Only workspace owners or admins can manage this board");
+        }
+    }
+
+    private void requireCanEditTask(Task task, Long userId) {
+        WorkspaceMember member = requireWorkspaceMember(task.getColumn(), userId);
+        if (isBoardManager(member) || isCreatedBy(task, userId) || isAssignedTo(task, userId)) {
+            return;
+        }
+
+        throw new AppException("You can only edit tasks assigned to you or created by you");
+    }
+
+    private boolean isBoardManager(WorkspaceMember member) {
+        return member.getRole() == WorkspaceRole.OWNER || member.getRole() == WorkspaceRole.ADMIN;
+    }
+
+    private boolean isCreatedBy(Task task, Long userId) {
+        return task.getCreatedBy() != null && task.getCreatedBy().getId().equals(userId);
+    }
+
+    private boolean isAssignedTo(Task task, Long userId) {
+        return task.getAssignee() != null && task.getAssignee().getId().equals(userId);
+    }
+
+    private void ensureProjectIsEditable(Project project, String message) {
+        if (project.getStatus() == ProjectStatus.ARCHIVED) {
+            throw new AppException(message);
+        }
+    }
+
+    private void requireSameProject(BoardColumn sourceColumn, BoardColumn targetColumn) {
+        if (!sourceColumn.getProject().getId().equals(targetColumn.getProject().getId())) {
+            throw new AppException("Cannot move task to another project");
         }
     }
 
@@ -196,6 +221,7 @@ public class TaskServiceImpl implements TaskService {
                 .position(t.getPosition())
                 .columnId(t.getColumn().getId())
                 .assigneeId(t.getAssignee() != null ? t.getAssignee().getId() : null)
+                .createdById(t.getCreatedBy() != null ? t.getCreatedBy().getId() : null)
                 .dueDate(t.getDueDate())
                 .build();
     }

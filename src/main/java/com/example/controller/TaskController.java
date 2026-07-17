@@ -4,13 +4,13 @@ import com.example.dto.task.*;
 import com.example.service.CurrentUserService;
 import com.example.service.TaskService;
 
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
-@CrossOrigin("*")
 @RestController
 @RequestMapping("/api/tasks")
 @RequiredArgsConstructor
@@ -22,7 +22,7 @@ public class TaskController {
     @PostMapping
     public TaskResponse create(
             @RequestParam Long columnId,
-            @RequestBody TaskRequest request
+            @Valid @RequestBody TaskRequest request
     ) {
         return taskService.create(columnId, request, currentUserService.get().getId());
     }
@@ -35,7 +35,7 @@ public class TaskController {
     @PutMapping("/{id}")
     public TaskResponse update(
             @PathVariable Long id,
-            @RequestBody TaskRequest request
+            @Valid @RequestBody TaskRequest request
     ) {
         return taskService.update(id, request, currentUserService.get().getId());
     }
@@ -48,7 +48,7 @@ public class TaskController {
     @PutMapping("/{id}/move")
     public TaskResponse move(
             @PathVariable Long id,
-            @RequestBody TaskMoveRequest request
+            @Valid @RequestBody TaskMoveRequest request
     ) {
         return taskService.move(id, request, currentUserService.get().getId());
     }

@@ -4,13 +4,13 @@ import com.example.dto.project.*;
 import com.example.service.CurrentUserService;
 import com.example.service.ProjectService;
 
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
-@CrossOrigin("*")
 @RestController
 @RequestMapping("/api/projects")
 @RequiredArgsConstructor
@@ -20,7 +20,7 @@ public class ProjectController {
     private final CurrentUserService currentUserService;
     
     @PostMapping
-    public ProjectResponse create(@RequestParam Long workspaceId, @RequestBody ProjectRequest request) {
+    public ProjectResponse create(@RequestParam Long workspaceId, @Valid @RequestBody ProjectRequest request) {
         return projectService.create(workspaceId, request, currentUserService.get().getId());
     }
 
@@ -35,7 +35,7 @@ public class ProjectController {
     }
 
     @PutMapping("/{id}")
-    public ProjectResponse update(@PathVariable Long id, @RequestBody ProjectRequest request) {
+    public ProjectResponse update(@PathVariable Long id, @Valid @RequestBody ProjectRequest request) {
         return projectService.update(id, request, currentUserService.get().getId());
     }
 

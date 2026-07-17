@@ -37,7 +37,7 @@ public class ColumnServiceImpl implements ColumnService {
             throw new AppException("Cannot add column to archived project");
         }
 
-        int position = columnRepository.findByProjectIdOrderByPositionAsc(projectId).size();
+        int position = Math.toIntExact(columnRepository.countByProjectId(projectId));
 
         BoardColumn column = BoardColumn.builder()
                 .name(request.getName())

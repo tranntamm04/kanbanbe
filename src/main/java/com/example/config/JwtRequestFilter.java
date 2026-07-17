@@ -17,6 +17,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import com.example.service.impl.CustomUserDetailsService;
+import io.jsonwebtoken.JwtException;
 
 import java.io.IOException;
 
@@ -40,7 +41,11 @@ public class JwtRequestFilter extends OncePerRequestFilter {
 
         if (header != null && header.startsWith("Bearer ")) {
             token = header.substring(7);
-            username = jwtTokenUtil.getUsernameFromJwtToken(token);
+            try {
+                username = jwtTokenUtil.getUsernameFromJwtToken(token);
+            } catch (JwtException | IllegalArgumentException ignored) {
+                username = null;
+            }
         }
 
         if (username != null && SecurityContextHolder.getContext().getAuthentication() == null) {

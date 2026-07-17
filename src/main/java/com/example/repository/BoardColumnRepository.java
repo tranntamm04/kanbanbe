@@ -9,6 +9,8 @@ public interface BoardColumnRepository extends JpaRepository<BoardColumn, Long> 
 
     List<BoardColumn> findByProjectIdOrderByPositionAsc(Long projectId);
 
+    long countByProjectId(Long projectId);
+
     void deleteByProjectId(Long projectId);
 
     void deleteByProjectWorkspaceId(Long workspaceId);
